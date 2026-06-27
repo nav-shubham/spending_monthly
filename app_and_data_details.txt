@@ -1,0 +1,111 @@
+========================================================================
+             UPI SPENDING ANALYZER: DATA AND APPLICATION DETAILS
+========================================================================
+
+This document details the analysis of your transaction data and the architecture
+of the spending analysis application built at:
+D:\PythonTools\spending_monthly
+
+------------------------------------------------------------------------
+1. DATA INVENTORY & ANALYSIS
+------------------------------------------------------------------------
+
+* Location of UPI Statements: 
+  D:\03 Permanent Personal Data\01 Expences\UPI_Statements
+
+* File Types:
+  - 10 Excel statements (.xlsx) spanning from 2025_08 (August 2025) to 2026_05 (May 2026).
+  - 8 PDF files (.pdf) containing identical statement records for visual backup.
+  - Note: The app runs exclusively on the .xlsx files because they contain structured tabular data.
+
+* Sheet Structure in Paytm Excel Files:
+  1. "Summary": Metadata, date ranges, and aggregated month totals.
+  2. "Passbook Payment History": Detailed row-by-row transaction log.
+
+* Raw Data Columns Available:
+  - Date (DD/MM/YYYY)
+  - Time (HH:MM:SS)
+  - Transaction Details (e.g., "Paid to...", "Received from...", "Transferred to Self...")
+  - Other Transaction Details (UPI ID or A/c No) (e.g., "paytm.s15cg9m@pty")
+  - Your Account (Bank / Wallet source, e.g., "Svc Co-Operative Bank - 67")
+  - Amount (String format with signs, e.g. "-290.00", "+210.00", or "14,790.00")
+  - UPI Ref No.
+  - Order ID
+  - Remarks
+  - Tags (Paytm auto-tag with emoji, e.g., "#🛒 Groceries", "#🛍 Shopping")
+  - Comment (used for IPO mandates, e.g. "This is not included in total...")
+
+* Data Aggregation Summary:
+  - Total Raw Records Found: 633 rows
+  - Valid Financial Transactions: 526 rows (after excluding blocked/unblocked IPO mandates)
+  - Unique UPI IDs Identified: 245 unique payment channels.
+  - Merchant Duplication Issue: Paytm generates unique payment IDs for the same business.
+    For example, "Shri Datta Mart" has transactions scattered under:
+    - paytm.s15cg9m@pty
+    - paytm.s15cfw1@pty
+    - paytm.s15cfxj@pty
+    - paytm.s25p8b8@pty
+    These are consolidated under a single merchant name by the application.
+
+------------------------------------------------------------------------
+2. THE STREAMLIT APPLICATION ARCHITECTURE
+------------------------------------------------------------------------
+
+We built an interactive, premium-designed data visualization application using Streamlit.
+
+* Project Directory Layout:
+  D:\PythonTools\spending_monthly\
+  ├── .gitignore             <- Configures untracked git folder settings (.venv, __pycache__)
+  ├── .python-version        <- Specifies Python version (3.12.10)
+  ├── pyproject.toml         <- UV project configuration and Python package requirements
+  ├── uv.lock                <- Hardlocked dependency tree
+  ├── run.bat                <- Double-click Windows launcher
+  ├── run.ps1                <- Double-click PowerShell launcher
+  ├── vendor_mappings.json   <- Database for mapping UPI IDs and text keywords to merchants
+  ├── app.py                 <- Main Streamlit application frontend and view controllers
+  ├── app_and_data_details.txt <- This details file
+  ├── src/
+  │   ├── __init__.py        <- Marks folder as a Python source package
+  │   ├── parser.py          <- Data ingestion, cleaning, date-parsing, and mandate filtering
+  │   ├── mapping.py         <- Mappings database manager (loads, resolves, saves rules)
+  │   └── styles.py          <- Custom HSL/dark theme CSS and HTML metric cards
+  └── tests/
+      ├── test_parser.py     <- Unit tests for cleaning amounts, tags, and detail text
+      └── test_mapping.py    <- Unit tests for exact/wildcard mapping resolutions
+
+------------------------------------------------------------------------
+3. APPLICATION TABS & FEATURES
+------------------------------------------------------------------------
+
+Tab 1: 📊 Dashboard
+- Key Metric Cards: Total Outflow, Total Inflow, Net Cashflow, Savings Rate. Fits in a single row without wrapping.
+- Monthly Cashflow Trend: Side-by-side bar chart showing Income vs Expenses per month.
+- Expenses by Category: Pie chart showing Tag breakdowns.
+- Top Vendors: Horizontal bar chart showing your top 15 spend merchants.
+
+Tab 2: 🔍 Spend Breakdown
+- Select Month: Filters data to a single statement month.
+- Interactive Sunburst Chart: Visualizes Month -> Category -> Vendor in nested rings. Allows clicking on a category/ring to zoom in and expand its merchants.
+- Drilldown Tables:
+  - Left Panel: List of Category Tags, spent amount, and share % of that month.
+  - Right Panel: Lists all Vendors inside the selected category, their spent amount, count, and share % of that category.
+
+Tab 3: 🔄 Comparison & Trends
+- Mode A: Item Trend (Historical)
+  - Select Category or Vendor and see a chronological bar chart of how much was spent on it month-over-month.
+  - Lists MoM absolute change (₹) and percentage change (%) in a details table.
+- Mode B: Month vs Month (Audit)
+  - Select a Base Month and a Target Month.
+  - Compares the Category or Vendor lists side-by-side in a grouped bar chart.
+  - Shows a comparative audit table listing: Spend in Month A, Spend in Month B, Difference (₹), and % Change.
+
+Tab 4: ⚙️ UPI-to-Vendor Mapping Manager
+- Add New Mapping Rule: Create Exact UPI matches or Keyword pattern rules (e.g. mapping any UPI containing "datta" or "relianceretail" to unified merchants). Saves instantly to vendor_mappings.json and refreshes UI.
+- Active Mapping Rules: View and delete active exact/pattern rules.
+- UPI ID Inspector: Details every unique UPI ID, total Spent/Received, and current resolved merchant to help you define new mappings.
+
+Tab 5: 🔍 Transaction Explorer
+- Text Search: Search by Vendor, UPI ID, or Transaction Details.
+- Category Filter: Filter list by Tag.
+- Transaction Type Selector: Filter by all, debits, or credits.
+- Safety-checked table rendering to prevent column name KeyError crashes.
