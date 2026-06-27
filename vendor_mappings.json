@@ -1,0 +1,18 @@
+{
+  "exact_mappings": {},
+  "pattern_mappings": {
+    "datta": "Shri Datta Mart",
+    "blinkit": "Blinkit",
+    "jio": "Jio / MyJio",
+    "myjio": "Jio / MyJio",
+    "relianceretail": "Jio / MyJio",
+    "admile": "Govind Admile",
+    "sadashiv": "Self / Sadashiv Kadam",
+    "dudhal": "Balaji Dudhal",
+    "electricity": "MSEDCL Electricity",
+    "openaillc": "OpenAI",
+    "meghakurhade": "Megha Kurhade",
+    "playstore": "Google Play Store",
+    "amazonpay": "Amazon Pay"
+  }
+}
