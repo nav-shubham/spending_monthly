@@ -121,7 +121,7 @@ if len(date_range) == 2:
     df = df[(df['ParsedDate'].dt.date >= start_dt) & (df['ParsedDate'].dt.date <= end_dt)]
 
 # ----------------- MAIN TABS -----------------
-tab1, tab2, tab3, tab4 = st.tabs(["📊 Dashboard", "🔍 Spend Breakdown", "⚙️ Vendor Mapping Manager", "🔍 Transaction Explorer"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Dashboard", "🔍 Spend Breakdown", "🔄 Comparison & Trends", "⚙️ Vendor Mapping Manager", "🔍 Transaction Explorer"])
 
 with tab1:
     # ----------------- METRICS -----------------
@@ -360,6 +360,175 @@ with tab2:
         st.info("No expense data available for hierarchical spend breakdown.")
 
 with tab3:
+    st.markdown("### 🔄 Comparison & Trends")
+    st.write("Compare category-wise and vendor-wise expenses over past months, or perform a direct comparison between two specific months.")
+    
+    df_comp = df[df['AmountNumeric'] < 0].copy()
+    if not df_comp.empty:
+        df_comp['YearMonth'] = df_comp['ParsedDate'].dt.to_period('M').astype(str)
+        available_months = sorted(df_comp['YearMonth'].unique(), reverse=True)
+        
+        comp_mode = st.radio("Select Comparison Mode", ["📈 Item Trend (Historical)", "🆚 Month vs Month (Audit)"], horizontal=True)
+        
+        if comp_mode == "📈 Item Trend (Historical)":
+            st.markdown("#### Analyze Category or Vendor over Time")
+            col_t1, col_t2 = st.columns([1, 2])
+            
+            with col_t1:
+                item_type = st.selectbox("Analyze by", ["Category", "Vendor"], key="trend_item_type")
+                if item_type == "Category":
+                    item_list = sorted(df_comp['CleanTag'].unique())
+                    selected_item = st.selectbox("Select Category", options=item_list, key="trend_selected_cat")
+                    filter_col = 'CleanTag'
+                else:
+                    item_list = sorted(df_comp['Vendor'].unique())
+                    selected_item = st.selectbox("Select Vendor", options=item_list, key="trend_selected_vendor")
+                    filter_col = 'Vendor'
+            
+            # Filter data for selected category/vendor
+            df_item = df_comp[df_comp[filter_col] == selected_item]
+            
+            # Group by Month
+            item_monthly = df_item.groupby('YearMonth')['AmountNumeric'].agg(
+                Spent=lambda x: abs(x.sum()),
+                Count='count'
+            ).reset_index()
+            
+            # Ensure all available months are represented (even if 0 spend)
+            all_months_df = pd.DataFrame({'YearMonth': available_months})
+            item_monthly = pd.merge(all_months_df, item_monthly, on='YearMonth', how='left').fillna(0.0)
+            item_monthly = item_monthly.sort_values(by='YearMonth', ascending=True) # Chronological for charts
+            
+            # Calculate Month-over-Month changes
+            item_monthly['Change (₹)'] = item_monthly['Spent'].diff()
+            item_monthly['% Change'] = item_monthly['Spent'].pct_change() * 100
+            
+            with col_t2:
+                # Plotly Chart
+                fig_trend = px.bar(
+                    item_monthly,
+                    x='YearMonth',
+                    y='Spent',
+                    text_auto='.0f',
+                    labels={'Spent': 'Amount Spent (₹)', 'YearMonth': 'Month'},
+                    color='Spent',
+                    color_continuous_scale=['#818cf8', '#6366f1', '#4f46e5']
+                )
+                fig_trend.update_layout(
+                    template='plotly_dark',
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    xaxis=dict(showgrid=False),
+                    yaxis=dict(gridcolor='#334155'),
+                    margin=dict(l=0, r=0, t=10, b=0),
+                    coloraxis_showscale=False
+                )
+                st.plotly_chart(fig_trend, use_container_width=True)
+                
+            st.markdown("##### 📜 Historical Comparison Details")
+            # Sort back for table (newest first)
+            table_display = item_monthly.sort_values(by='YearMonth', ascending=False)
+            st.dataframe(
+                table_display,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Spent": st.column_config.NumberColumn("Spent", format="₹%.2f"),
+                    "Change (₹)": st.column_config.NumberColumn("MoM Change (₹)", format="₹%.2f"),
+                    "% Change": st.column_config.NumberColumn("MoM Change (%)", format="%.1f%%"),
+                    "Count": "Txn Count"
+                }
+            )
+            
+        else: # Month vs Month Audit
+            st.markdown("#### Direct Comparison of Two Specific Months")
+            col_a1, col_a2, col_a3 = st.columns([1, 1, 1])
+            
+            with col_a1:
+                base_month = st.selectbox("Select Base Month (Past)", options=available_months, index=min(1, len(available_months)-1), key="audit_base_month")
+            with col_a2:
+                target_month = st.selectbox("Select Target Month (Recent)", options=available_months, index=0, key="audit_target_month")
+            with col_a3:
+                audit_type = st.selectbox("Compare by", ["Category", "Vendor"], key="audit_type_sel")
+                
+            # Filter data for both months
+            df_base = df_comp[df_comp['YearMonth'] == base_month]
+            df_target = df_comp[df_comp['YearMonth'] == target_month]
+            
+            group_col = 'CleanTag' if audit_type == "Category" else 'Vendor'
+            
+            # Aggregate spent for base month
+            base_agg = df_base.groupby(group_col)['AmountNumeric'].agg(lambda x: abs(x.sum())).reset_index()
+            base_agg = base_agg.rename(columns={'AmountNumeric': f'Spent_{base_month}'})
+            
+            # Aggregate spent for target month
+            target_agg = df_target.groupby(group_col)['AmountNumeric'].agg(lambda x: abs(x.sum())).reset_index()
+            target_agg = target_agg.rename(columns={'AmountNumeric': f'Spent_{target_month}'})
+            
+            # Merge both aggregations
+            audit_df = pd.merge(base_agg, target_agg, on=group_col, how='outer').fillna(0.0)
+            
+            # Calculate changes
+            audit_df['Change (₹)'] = audit_df[f'Spent_{target_month}'] - audit_df[f'Spent_{base_month}']
+            
+            def safe_pct(row):
+                base_val = row[f'Spent_{base_month}']
+                tgt_val = row[f'Spent_{target_month}']
+                if base_val == 0.0:
+                    return 100.0 if tgt_val > 0 else 0.0
+                return (row['Change (₹)'] / base_val) * 100
+                
+            audit_df['% Change'] = audit_df.apply(safe_pct, axis=1)
+            
+            # Sort by absolute difference
+            audit_df = audit_df.sort_values(by=f'Spent_{target_month}', ascending=False)
+            
+            # Chart Comparison
+            # Melt for grouped bar chart
+            melted_df = audit_df.melt(
+                id_vars=[group_col],
+                value_vars=[f'Spent_{base_month}', f'Spent_{target_month}'],
+                var_name='MonthGroup',
+                value_name='Spent'
+            )
+            melted_df['MonthGroup'] = melted_df['MonthGroup'].apply(lambda x: base_month if base_month in x else target_month)
+            
+            fig_compare = px.bar(
+                melted_df.head(30), # limit to top 15 pairs for readability
+                x=group_col,
+                y='Spent',
+                color='MonthGroup',
+                barmode='group',
+                labels={'Spent': 'Amount Spent (₹)', group_col: audit_type},
+                color_discrete_map={base_month: '#818cf8', target_month: '#10b981'}
+            )
+            fig_compare.update_layout(
+                template='plotly_dark',
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                xaxis=dict(tickangle=-45, gridcolor='rgba(0,0,0,0)'),
+                yaxis=dict(gridcolor='#334155'),
+                margin=dict(l=0, r=0, t=10, b=0),
+                legend=dict(orientation="h", y=1.05, x=0.01)
+            )
+            st.plotly_chart(fig_compare, use_container_width=True)
+            
+            st.markdown(f"##### 📊 Comparison Table: {base_month} vs {target_month}")
+            st.dataframe(
+                audit_df,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    f"Spent_{base_month}": st.column_config.NumberColumn(f"Spent in {base_month} (₹)", format="₹%.2f"),
+                    f"Spent_{target_month}": st.column_config.NumberColumn(f"Spent in {target_month} (₹)", format="₹%.2f"),
+                    "Change (₹)": st.column_config.NumberColumn("Difference (₹)", format="₹%.2f"),
+                    "% Change": st.column_config.NumberColumn("Difference (%)", format="%.1f%%")
+                }
+            )
+    else:
+        st.info("No expense data available for comparison analysis.")
+
+with tab4:
     st.markdown("### ⚙️ UPI-to-Vendor Mapping Manager")
     st.write(
         "Paytm UPI statements often list different payment IDs for the same merchant "
@@ -496,7 +665,7 @@ with tab3:
         }
     )
 
-with tab4:
+with tab5:
     st.markdown("### 🔍 Transaction Explorer")
     st.write("Browse and filter all parsed transactions.")
     
