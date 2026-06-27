@@ -28,7 +28,7 @@ def apply_custom_styles():
             background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
             border: 1px solid #334155;
             border-radius: 16px;
-            padding: 24px;
+            padding: 20px;
             margin-bottom: 20px;
             box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -4px rgba(0, 0, 0, 0.3);
             transition: transform 0.2s ease, border-color 0.2s ease;
@@ -57,7 +57,7 @@ def apply_custom_styles():
         
         /* Custom Metric Cards */
         .metric-title {
-            font-size: 0.9rem;
+            font-size: 0.85rem;
             color: #94a3b8;
             font-weight: 500;
             text-transform: uppercase;
@@ -65,10 +65,13 @@ def apply_custom_styles():
             margin-bottom: 8px;
         }
         .metric-value {
-            font-size: 2.2rem;
+            font-size: 1.7rem;
             font-weight: 700;
             margin-bottom: 6px;
             letter-spacing: -0.03em;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
         .metric-value.income {
             color: #10b981;

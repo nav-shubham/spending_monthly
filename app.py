@@ -121,7 +121,7 @@ if len(date_range) == 2:
     df = df[(df['ParsedDate'].dt.date >= start_dt) & (df['ParsedDate'].dt.date <= end_dt)]
 
 # ----------------- MAIN TABS -----------------
-tab1, tab2, tab3 = st.tabs(["📊 Dashboard", "⚙️ Vendor Mapping Manager", "🔍 Transaction Explorer"])
+tab1, tab2, tab3, tab4 = st.tabs(["📊 Dashboard", "🔍 Spend Breakdown", "⚙️ Vendor Mapping Manager", "🔍 Transaction Explorer"])
 
 with tab1:
     # ----------------- METRICS -----------------
@@ -268,6 +268,98 @@ with tab1:
         st.info("No vendor spend data available.")
 
 with tab2:
+    st.markdown("### 🔍 Hierarchical Spend Breakdown")
+    st.write("Drill down into your spending by month, then by category, and finally by vendor.")
+    
+    df_exp = df[df['AmountNumeric'] < 0].copy()
+    if not df_exp.empty:
+        df_exp['YearMonth'] = df_exp['ParsedDate'].dt.to_period('M').astype(str)
+        
+        # Get unique months in sorted order (newest first)
+        available_months = sorted(df_exp['YearMonth'].unique(), reverse=True)
+        
+        selected_month = st.selectbox("📅 Select Month", options=available_months, key="drilldown_month_sel")
+        
+        # Filter for selected month
+        df_month = df_exp[df_exp['YearMonth'] == selected_month]
+        total_month_spend = abs(df_month['AmountNumeric'].sum())
+        
+        st.markdown(f"#### Total Spending in {selected_month}: **₹{total_month_spend:,.2f}**")
+        
+        # Hierarchical Sunburst Chart
+        st.markdown("##### 🎯 Category & Vendor Sunburst")
+        fig_sun = px.sunburst(
+            df_month,
+            path=['CleanTag', 'Vendor'],
+            values=df_month['AmountNumeric'].abs(),
+            color_discrete_sequence=px.colors.qualitative.Safe
+        )
+        fig_sun.update_layout(
+            template='plotly_dark',
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            margin=dict(l=0, r=0, t=10, b=0)
+        )
+        st.plotly_chart(fig_sun, use_container_width=True)
+        
+        st.markdown("---")
+        
+        # Step-by-Step Drilldown Columns
+        st.markdown("##### 🗂️ Step-by-Step Analysis")
+        col_d1, col_d2 = st.columns(2)
+        
+        with col_d1:
+            st.markdown("**1. Category Breakdown**")
+            cat_spend = df_month.groupby('CleanTag')['AmountNumeric'].agg(lambda x: abs(x.sum())).reset_index()
+            cat_spend = cat_spend.rename(columns={'AmountNumeric': 'Spent'})
+            cat_spend['% of Month'] = (cat_spend['Spent'] / total_month_spend) * 100
+            cat_spend = cat_spend.sort_values(by='Spent', ascending=False)
+            
+            st.dataframe(
+                cat_spend,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Spent": st.column_config.NumberColumn("Spent", format="₹%.2f"),
+                    "% of Month": st.column_config.NumberColumn("% of Month", format="%.1f%%")
+                }
+            )
+            
+            # Select Category to drill down
+            selected_cat = st.selectbox(
+                "Select Category to view Vendors",
+                options=cat_spend['CleanTag'].unique(),
+                key="drilldown_cat_sel"
+            )
+            
+        with col_d2:
+            st.markdown(f"**2. Vendor Spend in *{selected_cat}***")
+            df_cat = df_month[df_month['CleanTag'] == selected_cat]
+            
+            vendor_spend = df_cat.groupby('Vendor').agg(
+                Spent=('AmountNumeric', lambda x: abs(x.sum())),
+                Count=('AmountNumeric', 'count')
+            ).reset_index()
+            
+            total_cat_spend = abs(df_cat['AmountNumeric'].sum())
+            vendor_spend['% of Category'] = (vendor_spend['Spent'] / total_cat_spend) * 100
+            vendor_spend = vendor_spend.sort_values(by='Spent', ascending=False)
+            
+            st.markdown(f"Total spent in {selected_cat}: **₹{total_cat_spend:,.2f}**")
+            st.dataframe(
+                vendor_spend,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Spent": st.column_config.NumberColumn("Spent", format="₹%.2f"),
+                    "% of Category": st.column_config.NumberColumn("% of Category", format="%.1f%%"),
+                    "Count": "Txn Count"
+                }
+            )
+    else:
+        st.info("No expense data available for hierarchical spend breakdown.")
+
+with tab3:
     st.markdown("### ⚙️ UPI-to-Vendor Mapping Manager")
     st.write(
         "Paytm UPI statements often list different payment IDs for the same merchant "
@@ -404,7 +496,7 @@ with tab2:
         }
     )
 
-with tab3:
+with tab4:
     st.markdown("### 🔍 Transaction Explorer")
     st.write("Browse and filter all parsed transactions.")
     
