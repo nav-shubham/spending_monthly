@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 import os
 from datetime import datetime
 
-from src.parser import load_all_statements
+from src.parser import load_all_statements, clean_amount
 from src.mapping import MappingManager
 from src.styles import apply_custom_styles, render_metric_card
 
@@ -203,7 +203,7 @@ with tab1:
             xaxis=dict(showgrid=False),
             yaxis=dict(title='Amount in ₹', gridcolor='#334155'),
             margin=dict(l=0, r=0, t=30, b=0),
-            legend=dict(orientation="h", ylink=1.1, y=1.05, x=0.01)
+            legend=dict(orientation="h", y=1.05, x=0.01)
         )
         st.plotly_chart(fig_monthly, use_container_width=True)
 
@@ -369,7 +369,7 @@ with tab2:
     upi_df_list = []
     unique_upis = df_raw[upi_col].unique()
     for upi in unique_upis:
-        if not upi:
+        if pd.isna(upi) or not str(upi).strip():
             continue
         sub = df_raw[df_raw[upi_col] == upi]
         
@@ -424,9 +424,9 @@ with tab3:
     if search_q:
         search_q = search_q.lower()
         df_exp = df_exp[
-            df_exp['Vendor'].str.lower().str.contains(search_q) |
-            df_exp['Other Transaction Details (UPI ID or A/c No)'].str.lower().str.contains(search_q) |
-            df_exp['Transaction Details'].str.lower().str.contains(search_q)
+            df_exp['Vendor'].str.lower().str.contains(search_q, na=False) |
+            df_exp['Other Transaction Details (UPI ID or A/c No)'].str.lower().str.contains(search_q, na=False) |
+            df_exp['Transaction Details'].str.lower().str.contains(search_q, na=False)
         ]
         
     if selected_tag != "All":
@@ -445,8 +445,11 @@ with tab3:
     
     st.markdown(f"**Showing {df_exp.shape[0]} transactions**")
     
+    # Safe column selection to prevent KeyError if any column is missing
+    available_cols = [col for col in show_cols if col in df_exp.columns]
+    
     st.dataframe(
-        df_exp[show_cols],
+        df_exp[available_cols],
         use_container_width=True,
         hide_index=True,
         column_config={
