@@ -1,84 +1,107 @@
-import json
-import os
+import re
+from typing import List, Dict, Any, Tuple, Optional
+from src.repository import Repository
 
 class MappingManager:
-    def __init__(self, mapping_file="vendor_mappings.json"):
-        self.mapping_file = mapping_file
-        self.exact_mappings = {}
-        self.pattern_mappings = {}
-        self.load_mappings()
+    def __init__(self, repository: Repository):
+        self.repository = repository
+        self.exact_rules = {}   # key -> target_vendor
+        self.pattern_rules = []  # list of (pattern, target_vendor, priority, rule_id)
+        self.regex_rules = []    # list of (regex_pattern, target_vendor, priority, rule_id)
+        self.refresh_rules_cache()
 
-    def load_mappings(self):
-        if os.path.exists(self.mapping_file):
-            try:
-                with open(self.mapping_file, "r") as f:
-                    data = json.load(f)
-                    self.exact_mappings = data.get("exact_mappings", {})
-                    self.pattern_mappings = data.get("pattern_mappings", {})
-            except Exception as e:
-                print(f"Error loading mapping file {self.mapping_file}: {e}")
-                self.exact_mappings = {}
-                self.pattern_mappings = {}
-        else:
-            self.exact_mappings = {}
-            self.pattern_mappings = {}
+    def refresh_rules_cache(self):
+        """Loads all active rules from SQLite database into memory for fast matching."""
+        rules = self.repository.get_rules()
+        
+        self.exact_rules = {}
+        self.pattern_rules = []
+        self.regex_rules = []
+        
+        for rule in rules:
+            if not rule.get('enabled', 1):
+                continue
+                
+            rule_id = rule['id']
+            rtype = rule['type']
+            val = rule['pattern_value'].strip()
+            target = rule['target_vendor_name']
+            priority = rule.get('priority', 1)
+            
+            if rtype == 'exact':
+                self.exact_rules[val.lower()] = (target, rule_id)
+            elif rtype == 'pattern':
+                self.pattern_rules.append((val.lower(), target, priority, rule_id))
+            elif rtype == 'regex':
+                try:
+                    compiled = re.compile(val, re.IGNORECASE)
+                    self.regex_rules.append((compiled, target, priority, rule_id))
+                except re.error as e:
+                    print(f"Invalid regex in rule #{rule_id}: {val} - {e}")
+                    
+        # Sort pattern rules by priority DESC
+        self.pattern_rules.sort(key=lambda x: x[2], reverse=True)
 
-    def save_mappings(self):
-        try:
-            with open(self.mapping_file, "w") as f:
-                json.dump({
-                    "exact_mappings": self.exact_mappings,
-                    "pattern_mappings": self.pattern_mappings
-                }, f, indent=2)
-        except Exception as e:
-            print(f"Error saving mapping file {self.mapping_file}: {e}")
-
-    def resolve_vendor(self, upi_id, default_vendor):
+    def resolve_vendor(self, upi_id: str, default_vendor: str, details_str: str = "") -> Tuple[str, Optional[int], bool]:
         """
-        Resolves a unified vendor name for a given UPI ID and default vendor name
-        using exact mappings first, then keyword pattern matching, and finally
-        falling back to the default vendor.
+        Resolves a vendor name using rules.
+        Returns:
+            (resolved_vendor_name, matching_rule_id, is_conflict)
         """
         upi_clean = str(upi_id).strip().lower()
         vendor_clean = str(default_vendor).strip().lower()
+        details_clean = str(details_str).strip().lower()
         
-        if not upi_clean:
-            return default_vendor
+        matches = []  # list of (resolved_name, rule_id, priority)
+        
+        # 1. Exact Match
+        if upi_clean in self.exact_rules:
+            target, r_id = self.exact_rules[upi_clean]
+            matches.append((target, r_id, 4))  # exact rules default priority 4
             
-        # 1. Exact matches (UPI ID)
-        for mapped_upi, vendor in self.exact_mappings.items():
-            if mapped_upi.strip().lower() == upi_clean:
-                return vendor
+        # 2. Regex Match
+        for pattern_re, target, priority, r_id in self.regex_rules:
+            if pattern_re.search(upi_clean) or pattern_re.search(vendor_clean) or pattern_re.search(details_clean):
+                matches.append((target, r_id, priority))
                 
-        # 2. Pattern matches (check if pattern is a substring of upi_id or default_vendor)
-        for pattern, vendor in self.pattern_mappings.items():
-            pat_clean = pattern.strip().lower()
-            if pat_clean in upi_clean or pat_clean in vendor_clean:
-                return vendor
+        # 3. Pattern Match
+        for pattern_val, target, priority, r_id in self.pattern_rules:
+            if pattern_val in upi_clean or pattern_val in vendor_clean or pattern_val in details_clean:
+                matches.append((target, r_id, priority))
                 
-        # 3. Fallback
-        return default_vendor
+        if not matches:
+            return default_vendor, None, False
+            
+        # Sort matches by priority descending
+        matches.sort(key=lambda x: x[2], reverse=True)
+        
+        # Simple conflict check: multiple matching rules resolving to DIFFERENT vendors
+        unique_vendors = set(m[0] for m in matches)
+        is_conflict = len(unique_vendors) > 1
+        
+        best_match = matches[0]
+        return best_match[0], best_match[1], is_conflict
 
-    def add_exact_mapping(self, upi_id, vendor_name):
-        self.exact_mappings[upi_id.strip()] = vendor_name.strip()
-        self.save_mappings()
+    def add_exact_mapping(self, upi_id: str, vendor_name: str, priority: int = 4):
+        self.repository.add_rule('exact', upi_id, vendor_name, priority=priority)
+        self.refresh_rules_cache()
 
-    def add_pattern_mapping(self, pattern, vendor_name):
-        self.pattern_mappings[pattern.strip()] = vendor_name.strip()
-        self.save_mappings()
+    def add_pattern_mapping(self, pattern: str, vendor_name: str, priority: int = 2):
+        self.repository.add_rule('pattern', pattern, vendor_name, priority=priority)
+        self.refresh_rules_cache()
 
-    def remove_exact_mapping(self, upi_id):
-        cleaned_id = upi_id.strip()
-        if cleaned_id in self.exact_mappings:
-            del self.exact_mappings[cleaned_id]
-            self.save_mappings()
-            return True
-        return False
+    def add_regex_mapping(self, pattern: str, vendor_name: str, priority: int = 3):
+        self.repository.add_rule('regex', pattern, vendor_name, priority=priority)
+        self.refresh_rules_cache()
 
-    def remove_pattern_mapping(self, pattern):
-        cleaned_pattern = pattern.strip()
-        if cleaned_pattern in self.pattern_mappings:
-            del self.pattern_mappings[cleaned_pattern]
-            self.save_mappings()
-            return True
-        return False
+    def remove_rule(self, rule_id: int) -> bool:
+        res = self.repository.delete_rule(rule_id)
+        if res:
+            self.refresh_rules_cache()
+        return res
+
+    def toggle_rule(self, rule_id: int, enabled: bool) -> bool:
+        res = self.repository.toggle_rule(rule_id, enabled)
+        if res:
+            self.refresh_rules_cache()
+        return res
